@@ -30,6 +30,21 @@ class PolymarketConfig:
 
 
 @dataclass
+class SolanaConfig:
+    rpc_url: str = os.getenv("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com")
+    jupiter_api_url: str = "https://quote-api.jup.ag/v6"
+    private_key: str = os.getenv("SOLANA_PRIVATE_KEY", "")
+
+
+@dataclass
+class PerpetualsConfig:
+    hyperliquid_api_url: str = "https://api.hyperliquid.xyz"
+    max_leverage: float = float(os.getenv("MAX_LEVERAGE", "5.0"))
+    funding_rate_threshold: float = 0.0001  # 0.01% per 8h
+    liquidation_buffer: float = 0.10  # 10% buffer before liquidation
+
+
+@dataclass
 class TradingConfig:
     starting_capital_usd: float = float(os.getenv("STARTING_CAPITAL_USD", "2.00"))
     moonshot_target_usd: float = float(os.getenv("MOONSHOT_TARGET_USD", "2000000.00"))
@@ -45,6 +60,8 @@ class AgentConfig:
     wallet: WalletConfig = field(default_factory=WalletConfig)
     rpc: RPCConfig = field(default_factory=RPCConfig)
     polymarket: PolymarketConfig = field(default_factory=PolymarketConfig)
+    solana: SolanaConfig = field(default_factory=SolanaConfig)
+    perpetuals: PerpetualsConfig = field(default_factory=PerpetualsConfig)
     trading: TradingConfig = field(default_factory=TradingConfig)
     optimism_level: str = os.getenv("OPTIMISM_LEVEL", "DELUSIONAL")
 

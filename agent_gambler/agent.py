@@ -25,6 +25,8 @@ from agent_gambler.config import AgentConfig
 from agent_gambler.strategies.gamblers_logic import GamblersLogic
 from agent_gambler.markets.polymarket import PolymarketClient
 from agent_gambler.markets.base_dex import BaseDEXClient
+from agent_gambler.markets.solana_dex import SolanaDEXClient
+from agent_gambler.markets.perpetuals import PerpetualsClient
 from agent_gambler.trading.portfolio import PortfolioManager
 from agent_gambler.trading.executor import TradeExecutor
 
@@ -59,6 +61,8 @@ class AgentGambler:
         self.strategy = GamblersLogic(config)
         self.polymarket = PolymarketClient(config)
         self.base_dex = BaseDEXClient(config)
+        self.solana_dex = SolanaDEXClient(config)
+        self.perpetuals = PerpetualsClient(config)
         self.portfolio = PortfolioManager(config)
         self.executor = TradeExecutor(config, self.portfolio, live_mode)
 
@@ -176,6 +180,24 @@ class AgentGambler:
             console.print(f"  Found {len(dex_opps)} Base DEX opportunities")
         except Exception as e:
             console.print(f"  [red]Base DEX scan error: {e}[/red]")
+
+        # Scan Solana DEX
+        console.print("[cyan]Scanning Solana DEX...[/cyan]")
+        try:
+            solana_opps = self.solana_dex.scan_for_opportunities()
+            all_opportunities.extend(solana_opps)
+            console.print(f"  Found {len(solana_opps)} Solana DEX opportunities")
+        except Exception as e:
+            console.print(f"  [red]Solana DEX scan error: {e}[/red]")
+
+        # Scan Perpetuals
+        console.print("[cyan]Scanning Perpetuals...[/cyan]")
+        try:
+            perp_opps = self.perpetuals.scan_for_opportunities()
+            all_opportunities.extend(perp_opps)
+            console.print(f"  Found {len(perp_opps)} Perpetual opportunities")
+        except Exception as e:
+            console.print(f"  [red]Perpetuals scan error: {e}[/red]")
 
         return all_opportunities
 

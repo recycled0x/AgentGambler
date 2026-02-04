@@ -19,7 +19,7 @@ from typing import Optional
 @dataclass
 class Position:
     position_id: str
-    platform: str  # "polymarket" or "base_dex"
+    platform: str  # "polymarket", "base_dex", "solana_dex", "hyperliquid"
     market_id: str
     market_name: str
     side: str  # "yes", "no", "long", "short"
@@ -31,13 +31,22 @@ class Position:
     take_profit: Optional[float] = None
     entry_time: float = field(default_factory=time.time)
     status: str = "open"  # "open", "closed", "stopped_out"
+    leverage: Optional[float] = None  # For perpetual positions
+    liquidation_price: Optional[float] = None  # For perpetual positions
+    funding_rate: float = 0.0  # Current funding rate for perps
 
     @property
     def unrealized_pnl(self) -> float:
         if self.side in ("yes", "long"):
-            return (self.current_price - self.entry_price) * self.quantity
+            pnl = (self.current_price - self.entry_price) * self.quantity
         else:
-            return (self.entry_price - self.current_price) * self.quantity
+            pnl = (self.entry_price - self.current_price) * self.quantity
+        
+        # Apply leverage multiplier for perpetuals
+        if self.leverage and self.leverage > 1.0:
+            pnl *= self.leverage
+        
+        return pnl
 
     @property
     def unrealized_pnl_pct(self) -> float:
@@ -92,8 +101,17 @@ class PortfolioManager:
 
     @property
     def total_exposure(self) -> float:
-        """Total USD value in open positions."""
-        return sum(p.size_usd + p.unrealized_pnl for p in self.positions.values() if p.status == "open")
+        """Total USD value in open positions (collateral for leveraged positions)."""
+        exposure = 0.0
+        for p in self.positions.values():
+            if p.status == "open":
+                if p.leverage and p.leverage > 1.0:
+                    # For leveraged positions, exposure is collateral + unrealized P&L
+                    collateral = p.size_usd / p.leverage
+                    exposure += collateral + p.unrealized_pnl
+                else:
+                    exposure += p.size_usd + p.unrealized_pnl
+        return exposure
 
     @property
     def available_balance(self) -> float:
@@ -163,7 +181,9 @@ class PortfolioManager:
     def open_position(self, position_id: str, platform: str, market_id: str,
                       market_name: str, side: str, entry_price: float,
                       size_usd: float, stop_loss: Optional[float] = None,
-                      take_profit: Optional[float] = None) -> Position:
+                      take_profit: Optional[float] = None,
+                      leverage: Optional[float] = None,
+                      liquidation_price: Optional[float] = None) -> Position:
         """Open a new position. Another step on the road to $2M."""
         quantity = size_usd / entry_price if entry_price > 0 else 0
 
@@ -179,10 +199,14 @@ class PortfolioManager:
             quantity=quantity,
             stop_loss=stop_loss,
             take_profit=take_profit,
+            leverage=leverage,
+            liquidation_price=liquidation_price,
         )
 
         self.positions[position_id] = position
-        self.current_balance -= size_usd
+        # For leveraged positions, only lock up collateral, not full position size
+        collateral = size_usd / leverage if leverage and leverage > 1.0 else size_usd
+        self.current_balance -= collateral
 
         return position
 
@@ -200,7 +224,12 @@ class PortfolioManager:
         pnl_pct = position.unrealized_pnl_pct
 
         # Return capital + profit (or minus loss)
-        self.current_balance += position.size_usd + pnl
+        # For leveraged positions, return collateral + leveraged P&L
+        if position.leverage and position.leverage > 1.0:
+            collateral = position.size_usd / position.leverage
+            self.current_balance += collateral + pnl
+        else:
+            self.current_balance += position.size_usd + pnl
         self.total_realized_pnl += pnl
 
         record = TradeRecord(
@@ -284,6 +313,9 @@ class PortfolioManager:
                     "stop_loss": p.stop_loss,
                     "entry_time": p.entry_time,
                     "status": p.status,
+                    "leverage": p.leverage,
+                    "liquidation_price": p.liquidation_price,
+                    "funding_rate": p.funding_rate,
                 }
                 for pid, p in self.positions.items()
             },
@@ -307,4 +339,8 @@ class PortfolioManager:
         self.total_fees_paid = state.get("total_fees_paid", 0.0)
 
         for pid, pdata in state.get("positions", {}).items():
+            # Handle missing fields for backward compatibility
+            pdata.setdefault("leverage", None)
+            pdata.setdefault("liquidation_price", None)
+            pdata.setdefault("funding_rate", 0.0)
             self.positions[pid] = Position(**pdata)

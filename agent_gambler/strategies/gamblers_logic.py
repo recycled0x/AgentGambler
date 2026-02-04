@@ -32,6 +32,12 @@ class BetType(Enum):
     DEX_LONG = "dex_long"
     DEX_SHORT = "dex_short"
     LIQUIDITY_SNIPE = "lp_snipe"
+    SOLANA_LONG = "solana_long"
+    SOLANA_SHORT = "solana_short"
+    PERP_LONG = "perp_long"
+    PERP_SHORT = "perp_short"
+    HYPERLIQUID_LONG = "hyperliquid_long"
+    HYPERLIQUID_SHORT = "hyperliquid_short"
 
 
 @dataclass

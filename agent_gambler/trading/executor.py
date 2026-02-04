@@ -80,15 +80,21 @@ class TradeExecutor:
         """
         position_id = f"pos_{uuid.uuid4().hex[:8]}"
 
-        if decision.opportunity.meta.get("platform") == "polymarket":
+        platform = decision.opportunity.meta.get("platform")
+        
+        if platform == "polymarket":
             return self._execute_polymarket(decision, position_id)
-        elif decision.opportunity.meta.get("platform") == "base_dex":
+        elif platform == "base_dex":
             return self._execute_dex_swap(decision, position_id)
+        elif platform == "solana_dex":
+            return self._execute_solana_swap(decision, position_id)
+        elif platform == "hyperliquid":
+            return self._execute_perpetual(decision, position_id)
         else:
             return ExecutionResult(
                 success=False,
                 position_id=position_id,
-                error=f"Unknown platform: {decision.opportunity.meta.get('platform')}",
+                error=f"Unknown platform: {platform}",
             )
 
     def _execute_polymarket(self, decision: BetDecision,
@@ -195,21 +201,37 @@ class TradeExecutor:
         # Simulate slippage (usually against us, because of course)
         import random
         slip = random.uniform(0, slippage)
-        if opp.bet_type in (BetType.POLYMARKET_YES, BetType.DEX_LONG):
+        if opp.bet_type in (BetType.POLYMARKET_YES, BetType.DEX_LONG, BetType.SOLANA_LONG, 
+                           BetType.PERP_LONG, BetType.HYPERLIQUID_LONG):
             executed_price = opp.current_price * (1 + slip)
         else:
             executed_price = opp.current_price * (1 - slip)
 
         # Simulate fees
-        fee_rate = 0.003 if opp.meta.get("platform") == "base_dex" else 0.002
+        platform = opp.meta.get("platform", "")
+        if platform == "base_dex":
+            fee_rate = 0.003
+        elif platform == "solana_dex":
+            fee_rate = 0.001  # Solana fees are lower
+        elif platform == "hyperliquid":
+            fee_rate = 0.0002  # Perp fees are very low
+        else:
+            fee_rate = 0.002
+        
         fees = decision.bet_size_usd * fee_rate
-
         actual_size = decision.bet_size_usd - fees
 
         # Open position in portfolio
         side = "yes" if opp.bet_type == BetType.POLYMARKET_YES else \
                "no" if opp.bet_type == BetType.POLYMARKET_NO else \
-               "long" if opp.bet_type == BetType.DEX_LONG else "short"
+               "long" if opp.bet_type in (BetType.DEX_LONG, BetType.SOLANA_LONG, 
+                                         BetType.PERP_LONG, BetType.HYPERLIQUID_LONG) else "short"
+        
+        # For perpetuals, extract leverage from meta or use default
+        leverage = None
+        if platform == "hyperliquid":
+            leverage = min(opp.meta.get("max_leverage", 20.0), 
+                          self.config.perpetuals.max_leverage)
 
         self.portfolio.open_position(
             position_id=position_id,
@@ -220,6 +242,7 @@ class TradeExecutor:
             entry_price=executed_price,
             size_usd=actual_size,
             stop_loss=decision.stop_loss_price,
+            leverage=leverage,
         )
 
         self.portfolio.total_fees_paid += fees
@@ -247,6 +270,20 @@ class TradeExecutor:
             return resp.json()["ethereum"]["usd"]
         except Exception:
             return 0.0
+
+    def _execute_solana_swap(self, decision: BetDecision,
+                             position_id: str) -> ExecutionResult:
+        """Execute a Solana DEX swap via Jupiter."""
+        # For now, use simulation mode
+        # In production, would use Jupiter SDK or direct API calls
+        return self._simulate_execution(decision, position_id, slippage=0.02)
+
+    def _execute_perpetual(self, decision: BetDecision,
+                           position_id: str) -> ExecutionResult:
+        """Execute a perpetual futures trade on Hyperliquid."""
+        # For now, use simulation mode
+        # In production, would use Hyperliquid REST API
+        return self._simulate_execution(decision, position_id, slippage=0.001)
 
     def close_position(self, position_id: str, exit_price: float,
                        reason: str = "manual") -> Optional[ExecutionResult]:
